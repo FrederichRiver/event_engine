@@ -1,26 +1,20 @@
-def service_init_stock_model():
-    
-    pass
-
-
 #!/usr/bin/python3
-
-from libsql_utils.model.stock import formStock, formStockManager
-from sqlalchemy.orm import Session
-from sqlalchemy import inspect
-from pandas import DataFrame
-from dev_global.path import CONF_FILE
-from libutils.utils import read_url
-import requests
 import datetime
-from finance_model.stock_list import get_stock_list2, get_index_list2
-from tarantula.generator.netease_generator import StockGenerator
-from tarantula.downloader.stock_data_downloader import StockDataDownloader
-from redis import StrictRedis
-from tarantula.parser.stock_data_parser import stock_name_parser, index_name_parser
-from basic_util.log import dlog
-import time
 import random
+import time
+from basic_util.log import dlog
+from dev_global.path import CONF_FILE
+from finance_model.stock_list import get_stock_list2, get_index_list2, read_stock_list
+from libsql_utils.model.stock import formStockManager, get_formStock
+from libutils.utils import read_url
+from pandas import DataFrame
+from redis import StrictRedis
+from sqlalchemy import inspect
+from sqlalchemy.orm import Session
+from tarantula.generator.netease_generator import StockGenerator, StockDataGenerator
+from tarantula.parser.stock_data_parser import stock_data_parser, stock_name_parser, index_name_parser
+from tarantula.downloader.stock_data_downloader import StockDataDownloader
+
 
 
 # 将来转移到libutils里面
@@ -73,7 +67,7 @@ def url_netease(url, stock_code, start_date, end_date) -> str:
     netease_url = url.format(query_code, start_date, end_date)
     return netease_url
 
-
+# 从头开始创建stock表
 def service_init_stock_data(engine):
     """
     used when first time download stock data.
@@ -92,7 +86,7 @@ def service_init_stock_data(engine):
     with Session(engine) as session:
         # 从redis中提取url并下载数据
         while url:=s.brpop('stock_table', 5):
-            time.sleep(random.randint(0, 5))
+            time.sleep(random.randint(2, 5))
             df = d.download(url[1])
             if not df.empty:
                 event_create_stock_table(engine, insp, session, df)
@@ -104,7 +98,7 @@ def event_create_stock_table(engine, insp: inspect, session: Session, df: DataFr
     if not insp.has_table(stock_code):
         print(f"{stock_code},{stock_name}")
         # 如果有stock_code没在stock_manager中就创建table
-        formStock.__table__.name = stock_code
+        formStock = get_formStock(stock_code)
         formStock.__table__.create(engine)
         # 更新stock_manager
         stock_table = formStockManager(
@@ -134,7 +128,7 @@ def service_init_index_data(engine):
     with Session(engine) as session:
         # 从redis中提取url并下载数据
         while url:=s.brpop('index_table', 5):
-            time.sleep(random.randint(0, 5))
+            time.sleep(random.randint(2, 5))
             df = d.download(url[1])
             if not df.empty:
                 event_create_index_table(engine, insp, session, df)
@@ -147,7 +141,7 @@ def event_create_index_table(engine, insp: inspect, session: Session, df: DataFr
     # print(f"{stock_code},{stock_name}")
     if not insp.has_table(stock_code):
         # 如果有stock_code没在stock_manager中就创建table
-        formStock.__table__.name = stock_code
+        formStock = get_formStock(stock_code)
         formStock.__table__.create(engine)
         # 更新stock_manager
         stock_table = formStockManager(
@@ -159,9 +153,33 @@ def event_create_index_table(engine, insp: inspect, session: Session, df: DataFr
         session.commit()
 
 
-# 创建stock表
+# 更新stock表
+def service_set_stock_table_url(engine):
+    # 读取old stock list    
+    s = StockDataGenerator()
+    stock_list = read_stock_list()
+    req_set = s.run(stock_list, end_date=datetime.date.today().strftime('%Y%m%d'))
+    s.set_value(req_set, db=2, key='stock_data') 
 
-# 检索录入A股信息，并创建stock表
+
+def service_update_stock_table(engine):
+    stock_list = read_stock_list()
+    d = StockDataDownloader()
+    rds = StrictRedis(db=2, decode_responses=True)
+    stock_list = rds.keys()
+    for stock in stock_list:
+        # print(stock)
+        item = rds.hmget(stock, ['stock_code', 'stock_code2', 'url'])
+        event_update_stock_table(engine, d, stock, item[2])
+        rds.hdel(stock,'stock_code', 'stock_code2', 'url')
+
+@dlog
+def event_update_stock_table(engine, downloader: StockDataDownloader , stock: str, url):
+    df = downloader.download(url)
+    df.fillna(0, inplace=True)
+    df.sort_index(ascending=True, inplace=True)
+    stock_data_parser(engine, stock, df)
+    
 
 # 检索录入港股信息和美股信息
 
