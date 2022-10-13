@@ -86,7 +86,7 @@ def service_init_stock_data(engine):
     with Session(engine) as session:
         # 从redis中提取url并下载数据
         while url:=s.brpop('stock_table', 5):
-            time.sleep(random.randint(2, 5))
+            time.sleep(random.randint(5, 10))
             df = d.download(url[1])
             if not df.empty:
                 event_create_stock_table(engine, insp, session, df)
@@ -128,7 +128,7 @@ def service_init_index_data(engine):
     with Session(engine) as session:
         # 从redis中提取url并下载数据
         while url:=s.brpop('index_table', 5):
-            time.sleep(random.randint(2, 5))
+            time.sleep(random.randint(5, 10))
             df = d.download(url[1])
             if not df.empty:
                 event_create_index_table(engine, insp, session, df)
@@ -161,17 +161,21 @@ def service_set_stock_table_url(engine):
     req_set = s.run(stock_list, end_date=datetime.date.today().strftime('%Y%m%d'))
     s.set_value(req_set, db=2, key='stock_data') 
 
-
+@dlog
 def service_update_stock_table(engine):
     stock_list = read_stock_list()
     d = StockDataDownloader()
     rds = StrictRedis(db=2, decode_responses=True)
     stock_list = rds.keys()
+    i = 0
     for stock in stock_list:
         # print(stock)
+        i += 1
         item = rds.hmget(stock, ['stock_code', 'stock_code2', 'url'])
         event_update_stock_table(engine, d, stock, item[2])
         rds.hdel(stock,'stock_code', 'stock_code2', 'url')
+        if i % 20 == 0:
+            time.sleep(20)
 
 @dlog
 def event_update_stock_table(engine, downloader: StockDataDownloader , stock: str, url):

@@ -2,7 +2,7 @@
 from setuptools import setup, find_packages
 from dev_global.env import GITHUB_URL, EMAIL
 
-v = (1, 0, 3)
+v = (1, 1, 5)
 
 setup(
         name='event_engine',

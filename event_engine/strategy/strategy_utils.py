@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-from unicodedata import name
 from libsql_utils.transaction import get_n_day_before_date
 from libsql_utils.engine import engine_init
 from pandas import DataFrame
